@@ -160,54 +160,57 @@ class DownloadDelegate: NSObject, NSURLSessionDownloadDelegate {
     }
 
     func URLSession(session: NSURLSession, downloadTask: NSURLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        let download = self.downloads[downloadTask.taskIdentifier]!
-        let progress = totalBytesExpectedToWrite == NSURLSessionTransferSizeUnknown ? -1 : Float(totalBytesWritten) / Float(totalBytesExpectedToWrite)
+        if let download = self.downloads[downloadTask.taskIdentifier] {
+            let progress = totalBytesExpectedToWrite == NSURLSessionTransferSizeUnknown ? -1 : Float(totalBytesWritten) / Float(totalBytesExpectedToWrite)
 
-        download.progress = progress
+            download.progress = progress
 
-        dispatch_async(dispatch_get_main_queue()) {
-            download.delegate?.download(download, didProgress: progress, totalBytesWritten: totalBytesWritten, totalBytesExpectedToWrite: totalBytesExpectedToWrite)
-            download.progression?(progress: progress, totalBytesWritten: totalBytesWritten, totalBytesExpectedToWrite: totalBytesExpectedToWrite)
-            return
+            dispatch_async(dispatch_get_main_queue()) {
+                download.delegate?.download(download, didProgress: progress, totalBytesWritten: totalBytesWritten, totalBytesExpectedToWrite: totalBytesExpectedToWrite)
+                download.progression?(progress: progress, totalBytesWritten: totalBytesWritten, totalBytesExpectedToWrite: totalBytesExpectedToWrite)
+                return
         }
+      }
     }
 
     func URLSession(session: NSURLSession, downloadTask: NSURLSessionDownloadTask, didFinishDownloadingToURL location: NSURL) {
-        let download = self.downloads[downloadTask.taskIdentifier]!
-        var fileError: NSError?
-        var resultingURL: NSURL?
+        if let download = self.downloads[downloadTask.taskIdentifier] {
+            var fileError: NSError?
+            var resultingURL: NSURL?
 
-        if NSFileManager.defaultManager().replaceItemAtURL(download.destinationURL, withItemAtURL: location, backupItemName: nil, options: nil, resultingItemURL: &resultingURL, error: &fileError) {
-            download.resultingURL = resultingURL
-        } else {
-            download.error = fileError
+            if NSFileManager.defaultManager().replaceItemAtURL(download.destinationURL, withItemAtURL: location, backupItemName: nil, options: nil, resultingItemURL: &resultingURL, error: &fileError) {
+                download.resultingURL = resultingURL
+            } else {
+                download.error = fileError
+            }
         }
     }
 
     func URLSession(session: NSURLSession, task: NSURLSessionTask, didCompleteWithError sessionError: NSError?) {
-        let download = self.downloads[task.taskIdentifier]!
-        var error: NSError? = sessionError ?? download.error
-        // Handle possible HTTP errors
-        if let response = task.response as? NSHTTPURLResponse {
-            // NSURLErrorDomain errors are not supposed to be reported by this delegate
-            // according to https://developer.apple.com/library/ios/documentation/Cocoa/Conceptual/URLLoadingSystem/NSURLSessionConcepts/NSURLSessionConcepts.html
-            // so let's ignore them as they sometimes appear there for now. (But WTF?)
-            if !validateResponse(response) && (error == nil || error!.domain == NSURLErrorDomain) {
-                error = NSError(domain: kTCBlobDownloadErrorDomain,
-                    code: TCBlobDownloadError.TCBlobDownloadHTTPError.rawValue,
-                    userInfo: [kTCBlobDownloadErrorDescriptionKey: "Erroneous HTTP status code: \(response.statusCode)",
-                               kTCBlobDownloadErrorFailingURLKey: task.originalRequest.URL!,
-                               kTCBlobDownloadErrorHTTPStatusKey: response.statusCode])
+        if let download = self.downloads[task.taskIdentifier] {
+            var error: NSError? = sessionError ?? download.error
+            // Handle possible HTTP errors
+            if let response = task.response as? NSHTTPURLResponse {
+                // NSURLErrorDomain errors are not supposed to be reported by this delegate
+                // according to https://developer.apple.com/library/ios/documentation/Cocoa/Conceptual/URLLoadingSystem/NSURLSessionConcepts/NSURLSessionConcepts.html
+                // so let's ignore them as they sometimes appear there for now. (But WTF?)
+                if !validateResponse(response) && (error == nil || error!.domain == NSURLErrorDomain) {
+                    error = NSError(domain: kTCBlobDownloadErrorDomain,
+                        code: TCBlobDownloadError.TCBlobDownloadHTTPError.rawValue,
+                        userInfo: [kTCBlobDownloadErrorDescriptionKey: "Erroneous HTTP status code: \(response.statusCode)",
+                                  kTCBlobDownloadErrorFailingURLKey: task.originalRequest.URL!,
+                                  kTCBlobDownloadErrorHTTPStatusKey: response.statusCode])
+                }
             }
-        }
 
-        // Remove the reference to the download
-        self.downloads.removeValueForKey(task.taskIdentifier)
+            // Remove the reference to the download
+            self.downloads.removeValueForKey(task.taskIdentifier)
 
-        dispatch_async(dispatch_get_main_queue()) {
-            download.delegate?.download(download, didFinishWithError: error, atLocation: download.resultingURL)
-            download.completion?(error: error, location: download.resultingURL)
-            return
+            dispatch_async(dispatch_get_main_queue()) {
+                download.delegate?.download(download, didFinishWithError: error, atLocation: download.resultingURL)
+                download.completion?(error: error, location: download.resultingURL)
+                return
+            }
         }
     }
 }
